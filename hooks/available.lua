@@ -1,54 +1,50 @@
 -- hooks/available.lua
--- Returns a list of available PHP versions from TorstenDittmann/php-binaries
+-- Returns a list of available PHP versions from multiple sources
 -- Documentation: https://mise.jdx.dev/tool-plugin-development.html#available-hook
 
 function PLUGIN:Available(ctx) -- luacheck: ignore
     local http = require("http")
     local json = require("json")
 
-    -- Fetch releases from TorstenDittmann/php-binaries
-    -- This repo provides prebuilt PHP binaries for Linux and macOS
-    local repo_url = "https://api.github.com/repos/TorstenDittmann/php-binaries/releases"
-
-    local resp, err = http.get({
-        url = repo_url,
-    })
-
-    if err ~= nil then
-        error("Failed to fetch PHP versions: " .. err)
-    end
-    if resp.status_code ~= 200 then
-        error("GitHub API returned status " .. resp.status_code .. ": " .. resp.body)
-    end
-
-    local releases = json.decode(resp.body)
     local versions = {}
     local seen = {}
 
-    -- Parse releases to extract PHP versions
-    -- Release format: assets like "php-8.4.6-macos-arm64.tar.gz"
-    for _, release in ipairs(releases) do
-        if release.assets then
-            for _, asset in ipairs(release.assets) do
-                -- Extract version from asset name: php-X.Y.Z-os-arch.tar.gz
-                local version = asset.name:match("^php%-([%d%.]+)%-")
-                if version and not seen[version] then
-                    seen[version] = true
+    -- Source 1: TorstenDittmann/php-binaries
+    local torsten_url = "https://api.github.com/repos/TorstenDittmann/php-binaries/releases"
+    local resp, err = http.get({ url = torsten_url })
 
-                    -- Determine note based on version
-                    local note = nil
-                    local major, minor = version:match("^(%d+)%.(%d+)")
-                    if major == "8" and minor == "5" then
-                        note = "latest"
-                    elseif major == "8" and minor == "4" then
-                        note = "stable"
+    if err == nil and resp.status_code == 200 then
+        local releases = json.decode(resp.body)
+        for _, release in ipairs(releases) do
+            if release.assets then
+                for _, asset in ipairs(release.assets) do
+                    local version = asset.name:match("^php%-([%d%.]+)%-")
+                    if version and not seen[version] then
+                        seen[version] = true
+                        table.insert(versions, {
+                            version = version,
+                            note = nil,
+                        })
                     end
-
-                    table.insert(versions, {
-                        version = version,
-                        note = note,
-                    })
                 end
+            end
+        end
+    end
+
+    -- Source 2: tobiashochguertel/php (fork with static binaries)
+    local hochguertel_url = "https://api.github.com/repos/tobiashochguertel/php/releases"
+    resp, err = http.get({ url = hochguertel_url })
+
+    if err == nil and resp.status_code == 200 then
+        local releases = json.decode(resp.body)
+        for _, release in ipairs(releases) do
+            local version = release.tag_name:gsub("^v", "")
+            if version and not seen[version] then
+                seen[version] = true
+                table.insert(versions, {
+                    version = version,
+                    note = "static",
+                })
             end
         end
     end

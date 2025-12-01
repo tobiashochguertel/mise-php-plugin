@@ -16,7 +16,7 @@ local function get_platform()
     local os_map = {
         ["darwin"] = "macos",
         ["linux"] = "linux",
-        ["windows"] = "windows", -- Not supported by this source
+        ["windows"] = "windows",
     }
 
     local arch_map = {
@@ -32,14 +32,63 @@ local function get_platform()
     return mapped_os, mapped_arch
 end
 
--- Fetch checksum from GitHub release
-local function fetch_checksum(version, filename)
-    local http = require("http")
+-- Try to find PHP binary from TorstenDittmann/php-binaries
+local function try_torsten_dittmann(version, os_name, arch, http, json)
+    local releases_url = "https://api.github.com/repos/TorstenDittmann/php-binaries/releases"
+    local resp, err = http.get({ url = releases_url })
 
-    -- TorstenDittmann releases don't have checksums in a separate file
-    -- We could potentially fetch from the release API if they add them
-    -- For now, return nil (mise will still work, just without verification)
-    return nil
+    if err ~= nil then
+        return nil, nil
+    end
+
+    local releases = json.decode(resp.body)
+    local filename = "php-" .. version .. "-" .. os_name .. "-" .. arch .. ".tar.gz"
+
+    for _, release in ipairs(releases) do
+        if release.assets then
+            for _, asset in ipairs(release.assets) do
+                if asset.name == filename then
+                    return asset.browser_download_url, nil
+                end
+            end
+        end
+    end
+
+    return nil, nil
+end
+
+-- Try to find PHP binary from tobiashochguertel/php (fork with 8.5+ support)
+local function try_hochguertel_php(version, os_name, arch, http, json)
+    -- This source uses static-php-cli naming: php-X.Y.Z-{linux|macos}-{x86_64|aarch64}.tar.gz
+    local arch_map_static = {
+        ["x64"] = "x86_64",
+        ["arm64"] = "aarch64",
+    }
+    local static_arch = arch_map_static[arch] or arch
+
+    local releases_url = "https://api.github.com/repos/tobiashochguertel/php/releases"
+    local resp, err = http.get({ url = releases_url })
+
+    if err ~= nil then
+        return nil, nil
+    end
+
+    local releases = json.decode(resp.body)
+    local filename = "php-" .. version .. "-" .. os_name .. "-" .. static_arch .. ".tar.gz"
+
+    for _, release in ipairs(releases) do
+        -- Check if this release matches our version (tag like v8.4.15)
+        local release_version = release.tag_name:gsub("^v", "")
+        if release_version == version and release.assets then
+            for _, asset in ipairs(release.assets) do
+                if asset.name == filename then
+                    return asset.browser_download_url, nil
+                end
+            end
+        end
+    end
+
+    return nil, nil
 end
 
 function PLUGIN:PreInstall(ctx) -- luacheck: ignore
@@ -51,50 +100,35 @@ function PLUGIN:PreInstall(ctx) -- luacheck: ignore
         error("Windows is not supported by this PHP plugin. Use the official PHP binaries from windows.php.net")
     end
 
-    -- Build download URL for TorstenDittmann/php-binaries
-    -- Format: https://github.com/TorstenDittmann/php-binaries/releases/download/{release_tag}/php-{version}-{os}-{arch}.tar.gz
-    -- Release tags use format like "2025.04.20-3"
-
-    -- First, we need to find which release contains this PHP version
     local http = require("http")
     local json = require("json")
 
-    local releases_url = "https://api.github.com/repos/TorstenDittmann/php-binaries/releases"
-    local resp, err = http.get({ url = releases_url })
+    -- Try sources in order of preference
+    local download_url = nil
+    local source_name = nil
 
-    if err ~= nil then
-        error("Failed to fetch releases: " .. err)
+    -- 1. Try TorstenDittmann/php-binaries (has more extensions, dynamically linked)
+    download_url = try_torsten_dittmann(version, os_name, arch, http, json)
+    if download_url then
+        source_name = "TorstenDittmann/php-binaries"
     end
 
-    local releases = json.decode(resp.body)
-    local download_url = nil
-    local filename = "php-" .. version .. "-" .. os_name .. "-" .. arch .. ".tar.gz"
-
-    -- Find the release containing our version
-    for _, release in ipairs(releases) do
-        if release.assets then
-            for _, asset in ipairs(release.assets) do
-                if asset.name == filename then
-                    download_url = asset.browser_download_url
-                    break
-                end
-            end
+    -- 2. Try tobiashochguertel/php (static binaries, may have newer versions)
+    if not download_url then
+        download_url = try_hochguertel_php(version, os_name, arch, http, json)
+        if download_url then
+            source_name = "tobiashochguertel/php"
         end
-        if download_url then break end
     end
 
     if not download_url then
         error("PHP " .. version .. " is not available for " .. os_name .. "-" .. arch ..
-              ". Available versions can be found at: https://github.com/TorstenDittmann/php-binaries/releases")
+              ". Check: https://github.com/TorstenDittmann/php-binaries/releases or https://github.com/tobiashochguertel/php/releases")
     end
-
-    -- Optional: Fetch checksum
-    local sha256 = fetch_checksum(version, filename)
 
     return {
         version = version,
         url = download_url,
-        sha256 = sha256,
-        note = "Downloading PHP " .. version .. " (" .. os_name .. "-" .. arch .. ")",
+        note = "Downloading PHP " .. version .. " from " .. source_name,
     }
 end
