@@ -60,15 +60,19 @@ This plugin downloads prebuilt PHP binaries from [TorstenDittmann/php-binaries](
 The prebuilt binaries include these extensions:
 
 **Web & Protocol:**
+
 - curl, openssl, sockets, soap, pcntl, fpm
 
 **Database:**
+
 - mysqli, pdo_mysql, pgsql, pdo_pgsql, sqlite3
 
 **Core & Performance:**
+
 - opcache, bcmath, zip
 
 **Text Processing:**
+
 - mbstring, iconv
 
 ## Limitations
@@ -82,12 +86,14 @@ The prebuilt binaries include these extensions:
 ### Version not found
 
 If a version is not available:
+
 1. Check [TorstenDittmann/php-binaries releases](https://github.com/TorstenDittmann/php-binaries/releases)
 2. Consider requesting the version or building locally
 
 ### Missing extensions
 
 The prebuilt binaries include common extensions. If you need additional extensions:
+
 1. Use `pecl` to install additional extensions
 2. Or build PHP from source using the vfox or asdf backend
 
